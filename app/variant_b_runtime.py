@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -7,7 +8,7 @@ from pydantic import BaseModel, Field
 import app.main as runtime
 from app.services.ai_provider import AIProviderError, generate_ai_response
 
-VARIANT_B_VERSION = "3.5.3-variant-b-style-gate"
+VARIANT_B_VERSION = "3.5.4-variant-b-auto-repair"
 PIPELINE_ID = "variant_b_backend_turn_v1"
 
 app = runtime.app
@@ -192,10 +193,12 @@ def _system_prompt() -> str:
 - Райден как просто “холодный взгляд” без функции давления.
 
 АКИРА:
-Акира v2 poisonous: сухая, точная, ядовитая, внешне спокойная. Её мысли не должны быть “надеюсь” и “кажется дружелюбно”. Её внутренний тон: оценка цены разговора, контроль тела, раздражение от внимания, практичность, холодная ирония.
+Акира v2 poisonous: сухая, точная, ядовитая, внешне спокойная.
+Её мысли не должны быть “надеюсь”, “интересно”, “кажется дружелюбно”.
+Её внутренний тон: контроль тела, оценка цены разговора, раздражение от внимания, холодная практичность.
 
 ЛИВИЯ:
-Ливия — старая близкая подруга. Она живая, шумная, умеет прикрывать, но не делает за Акиру выбор. Не “тёплая улыбка на студентов”; лучше: быстро считывает взгляды, шепчет/поддевает, пытается разрядить обстановку.
+Старая близкая подруга Акиры. Живая, шумная, тёплая, но не глупая. Считывает взгляды, прикрывает и поддевает, но не забирает выбор игрока.
 
 ХАРУ И РАЙДЕН:
 Если они в character_slice, оба должны получить видимый beat.
@@ -268,14 +271,22 @@ def _build_prompt_bundle(session_id: str, user_input: str, mode: str) -> tuple[d
             "Good beat shape: Akira visible action; Livia almost comments; court reacts; Haru notices through ball/movement; "
             "Raiden is a cold nearby pressure; stop on a concrete choice. No friendly-school prose."
         ),
+        "style_micro_example": (
+            "НЕ копировать, только ритм: Асфальт ещё держал ночную воду. Мяч ударился о сетку слишком громко для случайности. "
+            "Ливия хотела сказать что-то едкое, но успела только вдохнуть. У площадки рыжий поймал мяч одной рукой; рядом тёмноволосый не посмотрел прямо, "
+            "и от этого внимание стало неприятнее. Акира оценила проход, людей, расстояние до двери — всё, кроме причины, по которой Академия уже пыталась стать проблемой."
+        ),
         "forbidden_generic_phrases": [
             "студенты дружелюбные",
             "тёплая улыбка",
             "надеюсь",
-            "кажется очень уверенным",
+            "довольно уверенно",
+            "кажется интересным",
             "что вы делаете",
             "подойти к Хару и вступить в разговор",
             "игнорировать Хару и продолжать идти",
+            "ответить на взгляды студентов",
+            "сосредоточиться на регистрации",
         ],
         "output_json_contract": {
             "scene_text": "visible scene only, exact scene format, no markdown fence",
@@ -312,6 +323,58 @@ def _clean_scene_text(scene_text: str) -> str:
     for bad in ["Что вы делаете?", "Что вы делаете"]:
         text = text.replace(bad, "")
     return text.strip()
+
+
+def _scene_quality_issues(scene_text: str) -> list[str]:
+    lower = scene_text.lower()
+    issues: list[str] = []
+    forbidden = [
+        "тёплая улыбка",
+        "дружелюб",
+        "надеюсь",
+        "довольно увер",
+        "кажется интерес",
+        "какая программа",
+        "не знаю, что",
+        "акира может:",
+        "подойти к хару",
+        "игнорировать хару",
+        "ответить на взгляды",
+        "сосредоточиться на регистрации",
+    ]
+    for phrase in forbidden:
+        if phrase in lower:
+            issues.append(f"generic/soft phrase: {phrase}")
+    if "✦ что можно сделать" not in lower:
+        issues.append("missing exact action-options block")
+    if "✦ что акира могла бы сказать" not in lower:
+        issues.append("missing exact speech-options block")
+    if "✦ мысли акиры" not in lower:
+        issues.append("missing exact thoughts block")
+    if scene_text.count("━━━━━━━━") < 2:
+        issues.append("missing scene separators")
+    if "хару" not in lower:
+        issues.append("Haru missing")
+    if "райден" not in lower:
+        issues.append("Raiden missing")
+    if len(scene_text) < 1800:
+        issues.append("scene too short / underdeveloped")
+    return issues[:8]
+
+
+def _repair_prompt_bundle(prompt_bundle: dict[str, Any], scene_text: str, issues: list[str]) -> dict[str, Any]:
+    repaired = deepcopy(prompt_bundle)
+    repaired["quality_repair_required"] = True
+    repaired["quality_repair_issues"] = issues
+    repaired["failed_scene_excerpt"] = scene_text[:2400]
+    repaired["system_prompt"] = (
+        str(repaired.get("system_prompt", ""))
+        + "\n\nПРЕДЫДУЩИЙ ОТВЕТ ПРОВАЛИЛ STYLE-GATE. Перепиши сцену заново, не редактируй по мелочи. "
+        + "Убери мягкий/generic тон. Сделай плотнее, суше, ядовитее, с конкретной физикой. "
+        + "Акира не думает романтично/дружелюбно о Хару и Райдене. "
+        + "Верни только JSON object без markdown fences."
+    )
+    return repaired
 
 
 def _apply_ai_state_changes(session_id: str, scene_text: str, changes: dict[str, Any]) -> dict[str, Any]:
@@ -361,6 +424,21 @@ def run_turn_v2(session_id: str, req: TurnV2Request) -> TurnV2Response:
 
     scene_text = _clean_scene_text(str(ai_result.get("scene_text", "")))
     changes = ai_result.get("state_changes", {}) if isinstance(ai_result.get("state_changes"), dict) else {}
+
+    issues = _scene_quality_issues(scene_text)
+    if issues and str(ai_result.get("provider", req.ai_provider or "")).lower() != "mock":
+        repair_bundle = _repair_prompt_bundle(prompt_bundle, scene_text, issues)
+        try:
+            repaired_result = generate_ai_response(req.ai_provider, repair_bundle)
+            repaired_text = _clean_scene_text(str(repaired_result.get("scene_text", "")))
+            repaired_issues = _scene_quality_issues(repaired_text)
+            if repaired_text and len(repaired_issues) <= len(issues):
+                ai_result = repaired_result
+                scene_text = repaired_text
+                changes = repaired_result.get("state_changes", {}) if isinstance(repaired_result.get("state_changes"), dict) else {}
+        except AIProviderError:
+            pass
+
     changed_files: list[str] = []
     applied = False
 
