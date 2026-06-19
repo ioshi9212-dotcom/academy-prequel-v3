@@ -1,0 +1,9 @@
+runtime_characters:
+  akira: runtime/characters/akira.yaml
+  livia: runtime/characters/livia.yaml
+  haru: runtime/characters/haru.yaml
+  kir: runtime/characters/kir.yaml
+  raiden: runtime/characters/raiden.yaml
+notes:
+  use: compact play-mode summaries
+  priority: relationship_and_knowledge_slices_override_generic_runtime
