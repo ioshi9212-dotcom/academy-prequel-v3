@@ -1,0 +1,8 @@
+academy:
+  name: Академия Астрейн
+  year: 1198
+  social_system:
+    - рейтинги и статус важны
+    - сильные и заметные студенты быстро становятся объектом внимания
+    - слухи существуют, но не должны съедать каждую сцену
+  energy_environment: runtime/academy/energy_atmosphere.yaml
