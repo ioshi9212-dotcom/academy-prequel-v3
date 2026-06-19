@@ -1,0 +1,3 @@
+relationships:
+  source: state/relationships.json
+  rule: "Runtime session state is primary. This index only marks the relationships folder as available for sync."
