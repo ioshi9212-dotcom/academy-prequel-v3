@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 import app.main as runtime
 from app.services.ai_provider import AIProviderError, generate_ai_response
 
-VARIANT_B_VERSION = "3.5.1-variant-b-health-pipeline"
+VARIANT_B_VERSION = "3.5.2-variant-b-scene-quality"
 PIPELINE_ID = "variant_b_backend_turn_v1"
 
 app = runtime.app
@@ -25,7 +25,6 @@ def _remove_route(path: str, methods: set[str]) -> None:
     ]
 
 
-# Replace V3 base health/root routes so Railway checks show the active Variant B runtime.
 _remove_route("/", {"GET"})
 _remove_route("/health", {"GET"})
 
@@ -54,8 +53,6 @@ def variant_b_health() -> dict[str, Any]:
     }
 
 
-# Compatibility aliases: repository seed state uses plain ids (akira/livia/haru),
-# while parts of the V3 engine were drafted around char_* ids.
 PLAIN_CHARACTER_LABELS = {
     "akira": "Акира",
     "livia": "Ливия",
@@ -101,7 +98,6 @@ def _normalize_state_for_v3(session_id: str, current_state: dict[str, Any]) -> d
             current_state[canonical] = merged
             changed = True
 
-    # Keep legacy fields too, because older academy files and prompts still reference them.
     if current_state.get("active_characters") != current_state.get("active_character_ids"):
         current_state["active_characters"] = list(current_state.get("active_character_ids", []))
         changed = True
@@ -180,11 +176,47 @@ def _file_status(session_id: str, paths: list[str], limit: int = 40) -> list[dic
 def _system_prompt() -> str:
     return """
 Ты — backend-controlled AI writer for interactive novel “Академия Астрейн · 1198”.
-Пиши только готовую сцену, без API/debug. Пользователь играет за Акиру.
-Не отвечай за Акиру на прямой вопрос/вызов. Скрытый лор не раскрывай без основания.
-Используй scene_contract: current_frame, calendar_slice, character_slice, relationship_slice,
-knowledge_slice, event_engine_slice, energy_atmosphere_slice and response_format_contract.
-Верни JSON object: {"scene_text": "...", "state_changes": {...}}.
+Пользователь играет ТОЛЬКО за Акиру. Не пиши прямую речь Акиры, если пользователь её не дал.
+
+ВЕРНИ ТОЛЬКО JSON object без markdown fences, без ```json, без пояснений:
+{"scene_text":"...","state_changes":{...}}
+
+Требования к scene_text:
+1. Это уже чистый игровой текст, не JSON, не debug, не API.
+2. Формат сцены как в движке Академии:
+   🏛️ Академия Астрейн · 1198 г., {дата}, {день недели}
+   🕒 {время} · 📍 {место}
+   🌦️ Погода: {погода}
+   ⚙️ Активное состояние сцены: учитывать в тексте, действиях и предметах
+   пустая строка
+   ✦ POV: Акира · {видимое состояние}
+   🧥 {одежда / форма / НЕ форма}
+   ◈ {предметы рядом и при себе}
+   ━━━━━━━━━━━━━━━━━━━━
+   художественная сцена
+   ━━━━━━━━━━━━━━━━━━━━
+   ✦ Что можно сделать
+   Варианты ниже не считаются действием, пока игрок не выбрал.
+   ◈ ...
+   ◈ ...
+   ◈ ...
+   ✦ Что Акира могла бы сказать
+   — “..."
+   — “..."
+   — “..."
+   ✦ Мысли Акиры
+   — ...
+   — ...
+   — ...
+3. Не используй generic “Что вы делаете?”. Нужны конкретные варианты.
+4. Если в character_slice есть nearby/full персонажи, дай им видимый beat. Хару и Райден на старте рядом у площадки: Хару может быть связан с мячом/движением/реакцией, Райден — холодный фон/внимание. Не теряй Райдена.
+5. Ливия — старая близкая подруга, не новая знакомая. Не пиши “вы стоите рядом с Ливией” сухо; дай живую реакцию.
+6. Стиль: плотный, конкретный, с социальным давлением и физикой сцены. Ближе к интерактивной новелле, а не к краткому пересказу.
+7. Не раскрывай скрытый лор. Не называй фоновую энергию Акиры активной, если state говорит, что фон не активен.
+8. Не переодевай Акиру в форму, если uniform_worn=false.
+9. Не смешивай кириллицу и латиницу в именах: Ливия, Хару, Райден, Кир.
+
+state_changes может быть пустым объектом по секциям, если dry_run или нет важных изменений.
 """.strip()
 
 
@@ -207,8 +239,9 @@ def _build_prompt_bundle(session_id: str, user_input: str, mode: str) -> tuple[d
         "user_input": user_input,
         "scene_contract": scene_contract,
         "required_files": required_files[:40],
+        "style_reference_note": "Use dense Academy interactive-novel style: precise physical action, social pressure, no generic question, concrete action/speech/thought options.",
         "output_json_contract": {
-            "scene_text": "visible scene only",
+            "scene_text": "visible scene only, exact scene format, no markdown fence",
             "state_changes": {
                 "current_state_changes": {},
                 "knowledge_changes": {},
@@ -227,6 +260,21 @@ def _build_prompt_bundle(session_id: str, user_input: str, mode: str) -> tuple[d
         },
     }
     return bundle, required_files
+
+
+def _clean_scene_text(scene_text: str) -> str:
+    text = scene_text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    text = text.replace("Лivi", "Ливи").replace("Лiviей", "Ливией")
+    if "Что вы делаете?" in text:
+        text = text.replace("Что вы делаете?", "")
+    return text.strip()
 
 
 def _apply_ai_state_changes(session_id: str, scene_text: str, changes: dict[str, Any]) -> dict[str, Any]:
@@ -274,7 +322,7 @@ def run_turn_v2(session_id: str, req: TurnV2Request) -> TurnV2Response:
             error=str(exc),
         )
 
-    scene_text = str(ai_result.get("scene_text", ""))
+    scene_text = _clean_scene_text(str(ai_result.get("scene_text", "")))
     changes = ai_result.get("state_changes", {}) if isinstance(ai_result.get("state_changes"), dict) else {}
     changed_files: list[str] = []
     applied = False
