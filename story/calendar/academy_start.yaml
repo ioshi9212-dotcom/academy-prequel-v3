@@ -1,0 +1,24 @@
+calendar_id: academy_start
+calendar_reading_protocol:
+  rule: "Use only the current day block unless the player skips time or requests audit."
+days:
+  day_1198_08_15:
+    date: "1198-08-15"
+    weekday: "понедельник"
+    time_start: "late_morning"
+    location_start: "academy_back_court_exit"
+    title: "Первый день: задний выход и баскетбольные площадки"
+    must_happen:
+      - "Акира и Ливия входят через задний выход у баскетбольных площадок."
+      - "Учитывать влажный асфальт после дождя, прохладный ветер, студентов у площадки."
+      - "Первый социальный узел связан с Хару и баскетбольной зоной."
+      - "Регистрация и движение в Академию не должны становиться пустым микрошагом."
+    active_characters: ["akira", "livia"]
+    scheduled_character_ids: ["haru"]
+    delayed_character_ids: ["kir"]
+    background_possible: ["raiden"]
+    prohibitions:
+      - "не надевать форму на Акиру до действия игрока"
+      - "не раскрывать секреты будущего"
+      - "не делать Ливию новой знакомой"
+      - "не делать Райдена светловолосым"
