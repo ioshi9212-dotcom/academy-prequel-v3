@@ -40,20 +40,69 @@ def _compact_load_source_context(
     return result
 
 
+def _safe_build_prompt_bundle(session_id: str, user_input: str, mode: str):
+    """Remove copyable examples; keep rules as constraints only."""
+    bundle, required_files = variant_b_runtime._original_build_prompt_bundle(session_id, user_input, mode)
+    bundle.pop("style_micro_example", None)
+    bundle["style_generation_constraints"] = {
+        "do_not_copy_prompt_text": True,
+        "pov_filter": "Describe people only through what Akira can observe and judge. No objective labels like charismatic/confident/interesting.",
+        "dialogue_format": "Descriptions/remarks in italics. Character speech as **Name** — text. Do not write Akira speech unless user wrote it.",
+        "action_weight_rule": "Each action option must include a distinct consequence weight: risk, information, social pressure, speed, relationship, or control.",
+        "thought_rule": "Akira thoughts must be concrete working assessments, not philosophy or friendly curiosity.",
+    }
+    bundle["forbidden_generic_phrases"] = list(
+        dict.fromkeys(
+            list(bundle.get("forbidden_generic_phrases", []))
+            + [
+                "Асфальт ещё держал ночную воду",
+                "Мяч ударился о сетку слишком громко для случайности",
+                "Ливия хотела сказать что-то едкое",
+                "Акира оценила проход, людей, расстояние до двери",
+                "харизматичный рыжий",
+                "рыжий и харизматичный",
+                "Райден кажется интересным",
+                "Вопрос был, как Акира решила бы",
+            ]
+        )
+    )
+    return bundle, required_files
+
+
 def _repair_toggle_quality_issues(scene_text: str) -> list[str]:
     """Allow disabling the second Groq call when free TPM is tight."""
     enabled = os.getenv("QUALITY_AUTO_REPAIR", "true").strip().lower()
     if enabled in {"0", "false", "no", "off"}:
         return []
-    return variant_b_runtime._original_scene_quality_issues(scene_text)
+    issues = variant_b_runtime._original_scene_quality_issues(scene_text)
+    lower = scene_text.lower()
+    copied_example_bits = [
+        "асфальт ещё держал ночную воду",
+        "мяч ударился о сетку слишком громко для случайности",
+        "ливия хотела сказать что-то едкое",
+        "акира оценила проход, людей, расстояние до двери",
+    ]
+    for phrase in copied_example_bits:
+        if phrase in lower:
+            issues.append(f"copied prompt micro-example: {phrase}")
+    if "вопрос был, как акира" in lower:
+        issues.append("external author framing instead of playable choice")
+    if "✦ что можно сделать" not in lower:
+        issues.append("missing playable action block")
+    return issues[:12]
 
 
 variant_b_runtime._load_source_context = _compact_load_source_context
+
+if not hasattr(variant_b_runtime, "_original_build_prompt_bundle"):
+    variant_b_runtime._original_build_prompt_bundle = variant_b_runtime._build_prompt_bundle
+variant_b_runtime._build_prompt_bundle = _safe_build_prompt_bundle
+
 if not hasattr(variant_b_runtime, "_original_scene_quality_issues"):
     variant_b_runtime._original_scene_quality_issues = variant_b_runtime._scene_quality_issues
 variant_b_runtime._scene_quality_issues = _repair_toggle_quality_issues
 
-variant_b_runtime.VARIANT_B_VERSION = "3.5.7-variant-b-groq-free-safe"
+variant_b_runtime.VARIANT_B_VERSION = "3.5.8-variant-b-no-copy-example"
 variant_b_runtime.app.version = variant_b_runtime.VARIANT_B_VERSION
 
 app = variant_b_runtime.app
