@@ -78,11 +78,17 @@ def _openai_compatible_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]
             raise AIProviderError("AI_MAX_TOKENS / OPENAI_COMPATIBLE_MAX_TOKENS must be an integer") from exc
 
     url = f"{base_url}/chat/completions"
+    user_agent = os.getenv(
+        "OPENAI_COMPATIBLE_USER_AGENT",
+        "AcademyPrequelV3-Railway/3.5.1 (+https://prequel-v3-production.up.railway.app)",
+    )
     request = urllib.request.Request(
         url,
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": user_agent,
             "Authorization": f"Bearer {api_key}",
         },
         method="POST",
