@@ -1,16 +1,28 @@
 {
   "state_id": "current_state",
-  "project_slug": "akira-academy-prequel",
+  "project_slug": "academy-prequel-v3",
   "story": "academy_prequel_1198",
   "current_date": "1198-08-15",
+  "current_day_id": "day_1198_08_15",
+  "current_day_of_week": "понедельник",
   "current_time": "late_morning",
+  "time_of_day": "morning",
+  "current_calendar_id": "academy_start",
+  "current_arc_id": "arc_001_academy_start",
   "current_location_id": "academy_back_court_exit",
   "current_location_text": "Академия Астрейн, задний выход со стороны корта / баскетбольные площадки",
+  "pov_character_id": "akira",
   "akira_behavior_profile": "akira_v2_poisonous",
   "weather": {
-    "summary": "set in first scene",
-    "temperature_feel": null,
-    "details": []
+    "summary": "серое небо после ночного дождя, влажный асфальт, прохладный ветер",
+    "condition": "серое небо после ночного дождя",
+    "temperature_feel": "прохладно",
+    "wind": "прохладный ветер",
+    "ground": "влажный асфальт",
+    "details": [
+      "влажный асфальт у баскетбольных площадок",
+      "прохладный ветер цепляет волосы и края одежды"
+    ]
   },
   "akira_state": {
     "visible_state": "calm outside",
@@ -19,6 +31,19 @@
     "player_defined_state": null,
     "visible_mark": "scratch on cheek covered by a plaster placed by Livia",
     "hair_state": "loose white hair by default unless player states braid/wet hair/other style"
+  },
+  "character_status": {
+    "akira": {
+      "physical_state": "после дороги, внешне спокойна и собрана",
+      "state_notes": [
+        "пластырь Ливии на щеке",
+        "белые волосы распущены по умолчанию"
+      ],
+      "clothing_state": "кроссовки, чёрные карго, топ, бордовый худи",
+      "hair_state": "длинные белые волосы распущены",
+      "runtime_variant": "version_2_poisonous",
+      "behavior_version": "version_2_poisonous"
+    }
   },
   "current_outfit": "кроссовки, чёрные штаны карго, топ, бордовый худи",
   "uniform_worn": false,
@@ -33,13 +58,25 @@
     "akira",
     "livia"
   ],
-  "nearby_characters": [],
-  "scheduled_character_ids": [
-    "haru"
+  "active_character_ids": [
+    "akira",
+    "livia"
   ],
+  "nearby_characters": [
+    "haru",
+    "raiden"
+  ],
+  "nearby_character_ids": [
+    "haru",
+    "raiden"
+  ],
+  "scheduled_character_ids": [],
   "mentioned_character_ids": [],
   "delayed_character_ids": [
     "kir"
+  ],
+  "background_character_ids": [
+    "raiden"
   ],
   "allowed_main_characters": [
     "akira",
@@ -50,14 +87,15 @@
     "kiara",
     "kael_north"
   ],
-  "current_scene_goal": "Academy arrival through the back court exit and first social contact near the basketball courts",
+  "current_scene_goal": "Academy arrival through the back court exit and first social contact near the basketball courts; Haru and Raiden are nearby at the court, with Raiden as a cold background presence unless scene pressure justifies direct contact.",
   "last_player_input": null,
   "scene_count": 0,
   "rules": [
-    "Use only akira-academy-prequel data.",
+    "Use only academy-prequel-v3 / akira-academy-prequel data.",
     "Start 1198-08-15 from the back exit by the court / basketball courts, not the main courtyard.",
     "Akira starts in ordinary pants outfit: sneakers, black cargo pants, top, burgundy hoodie.",
     "Do not treat Academy uniform as worn until player action or explicit state says uniform_worn=true.",
+    "Haru and Raiden are near the basketball court at the start; Haru can engage through the basketball beat, Raiden is nearby/background unless direct scene pressure justifies contact.",
     "Do not stretch time without reason.",
     "Use only visible real items in scene header.",
     "Do not reveal hidden lore automatically.",
@@ -73,6 +111,6 @@
     "15 августа 1198 на щеке Акиры пластырь: Ливия наклеила его после ссадины.",
     "Ссадина появилась за день до Академии, когда Акира в грозу доставала кота с дерева; Кир видел это.",
     "Акира и Ливия входят через менее людный задний выход со стороны корта/баскетбольных площадок по совету Рэя.",
-    "Первый социальный узел дня связан с Хару и баскетбольной зоной; Райден может быть фоном рядом с Хару, но прямой контакт требует сценовой причины."
+    "Первый социальный узел дня связан с Хару и баскетбольной зоной; Райден находится рядом с Хару как холодный заметный фон, но прямой контакт требует сценовой причины."
   ]
 }
