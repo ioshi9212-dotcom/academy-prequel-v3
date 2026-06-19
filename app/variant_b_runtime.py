@@ -7,8 +7,52 @@ from pydantic import BaseModel, Field
 import app.main as runtime
 from app.services.ai_provider import AIProviderError, generate_ai_response
 
+VARIANT_B_VERSION = "3.5.1-variant-b-health-pipeline"
+PIPELINE_ID = "variant_b_backend_turn_v1"
+
 app = runtime.app
-app.version = "3.5.0-variant-b-skeleton"
+app.version = VARIANT_B_VERSION
+
+
+def _remove_route(path: str, methods: set[str]) -> None:
+    app.router.routes = [
+        route
+        for route in app.router.routes
+        if not (
+            getattr(route, "path", None) == path
+            and bool(set(getattr(route, "methods", set()) or set()) & methods)
+        )
+    ]
+
+
+# Replace V3 base health/root routes so Railway checks show the active Variant B runtime.
+_remove_route("/", {"GET"})
+_remove_route("/health", {"GET"})
+
+
+@app.get("/")
+def variant_b_root() -> dict[str, Any]:
+    return {
+        "success": True,
+        "project": runtime.PROJECT_SLUG,
+        "version": VARIANT_B_VERSION,
+        "pipeline": PIPELINE_ID,
+        "health": "/health",
+        "actions_schema": "/openapi-v2-actions.json",
+        "turn_endpoint": "/api/v2/sessions/{session_id}/turn",
+    }
+
+
+@app.get("/health")
+def variant_b_health() -> dict[str, Any]:
+    return {
+        "success": True,
+        "project": runtime.PROJECT_SLUG,
+        "version": VARIANT_B_VERSION,
+        "pipeline": PIPELINE_ID,
+        "time": runtime.utc_now(),
+    }
+
 
 # Compatibility aliases: repository seed state uses plain ids (akira/livia/haru),
 # while parts of the V3 engine were drafted around char_* ids.
@@ -106,6 +150,7 @@ class TurnV2Request(BaseModel):
 
 class TurnV2Response(BaseModel):
     success: bool
+    pipeline: str = PIPELINE_ID
     session_id: str
     mode: str
     dry_run: bool
@@ -155,7 +200,7 @@ def _build_prompt_bundle(session_id: str, user_input: str, mode: str) -> tuple[d
     )
 
     bundle = {
-        "pipeline": "variant_b_backend_turn_v1",
+        "pipeline": PIPELINE_ID,
         "system_prompt": _system_prompt(),
         "session_id": session_id,
         "mode": mode,
@@ -218,6 +263,7 @@ def run_turn_v2(session_id: str, req: TurnV2Request) -> TurnV2Response:
     except AIProviderError as exc:
         return TurnV2Response(
             success=False,
+            pipeline=PIPELINE_ID,
             session_id=sid,
             mode=req.mode,
             dry_run=req.dry_run,
@@ -240,6 +286,7 @@ def run_turn_v2(session_id: str, req: TurnV2Request) -> TurnV2Response:
 
     return TurnV2Response(
         success=True,
+        pipeline=PIPELINE_ID,
         session_id=sid,
         mode=req.mode,
         dry_run=req.dry_run,
@@ -257,7 +304,7 @@ def openapi_v2_actions() -> dict[str, Any]:
     server = runtime.PUBLIC_BASE_URL or "https://your-service.up.railway.app"
     return {
         "openapi": "3.1.0",
-        "info": {"title": f"{runtime.PROJECT_SLUG} Variant B Actions", "version": app.version},
+        "info": {"title": f"{runtime.PROJECT_SLUG} Variant B Actions", "version": VARIANT_B_VERSION},
         "servers": [{"url": server}],
         "paths": {
             "/health": {
