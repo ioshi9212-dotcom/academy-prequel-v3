@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 import app.main as runtime
 from app.services.ai_provider import AIProviderError, generate_ai_response
 
-VARIANT_B_VERSION = "3.5.4-variant-b-auto-repair"
+VARIANT_B_VERSION = "3.5.5-variant-b-source-pov-format"
 PIPELINE_ID = "variant_b_backend_turn_v1"
 
 app = runtime.app
@@ -174,6 +174,50 @@ def _file_status(session_id: str, paths: list[str], limit: int = 40) -> list[dic
     return result
 
 
+def _source_context_paths(required_files: list[str]) -> list[str]:
+    priority = [
+        "runtime/characters/akira.yaml",
+        "runtime/characters/livia.yaml",
+        "runtime/characters/haru.yaml",
+        "runtime/characters/raiden.yaml",
+        "runtime/characters/kir.yaml",
+        "relationships/relationships_index.yaml",
+        "story/calendar/academy_start.yaml",
+        "story/arcs/arc_001_academy_start.yaml",
+        "world/locations/academy_back_court_exit/location_card.yaml",
+        "world/locations/academy_back_court_exit/visual_description.md",
+        "engine/pov_rules.md",
+        "engine/prose_style_rules.md",
+        "engine/output_format.md",
+        "engine/scene_generation_rules.md",
+        "engine/scene_quality_gate.md",
+        "engine/runtime_character_slice_rules.md",
+    ]
+    merged = runtime.unique(priority + list(required_files))
+    return merged
+
+
+def _load_source_context(session_id: str, paths: list[str], max_total_chars: int = 28000, max_file_chars: int = 3500) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    total = 0
+    for path in paths:
+        if total >= max_total_chars:
+            break
+        try:
+            text = runtime.read_project_or_runtime_file(path, session_id)
+        except Exception:
+            continue
+        trimmed = text[:max_file_chars]
+        remaining = max_total_chars - total
+        if len(trimmed) > remaining:
+            trimmed = trimmed[:remaining]
+        if not trimmed.strip():
+            continue
+        result.append({"path": path, "content": trimmed})
+        total += len(trimmed)
+    return result
+
+
 def _system_prompt() -> str:
     return """
 Ты — backend-controlled AI writer for интерактивной новеллы “Академия Астрейн · 1198”.
@@ -182,28 +226,38 @@ def _system_prompt() -> str:
 ВЕРНИ ТОЛЬКО JSON object без markdown fences:
 {"scene_text":"...","state_changes":{...}}
 
-ЖЁСТКИЙ СТИЛЬ-ГЕЙТ:
-Пиши как Academy-prequel engine: плотный интерактивный текст, конкретная физика сцены, социальное давление, короткие реплики, скрытое напряжение. Не писать как добрую школьную экскурсию.
+ОБЯЗАТЕЛЬНО ЧИТАЙ И ИСПОЛЬЗУЙ:
+- source_context: карточки персонажей, отношения, локация, календарь, правила прозы;
+- character_slice: активные/nearby персонажи;
+- current_frame: дата, место, состояние сцены.
+Если информации нет в source_context/character_slice — не выдумывай ярлык характера, лучше покажи нейтральное действие/молчание.
 
-ЗАПРЕЩЁННЫЙ ТОН:
-- “студенты дружелюбные”, “тёплая улыбка на окружающих”, “надеюсь”, “довольно”, “кажется очень уверенным”, “не знаю, что происходит”, “какая программа на сегодня”;
-- generic-варианты вроде “подойти и поговорить”, “игнорировать и идти”, “ответить на взгляды”;
-- дружелюбная Акира, робкая Акира, объясняющаяся Акира;
-- Хару как пустой флиртующий красавчик;
-- Райден как просто “холодный взгляд” без функции давления.
+POV Акиры:
+Пиши только то, как Акира воспринимает сцену. Нельзя авторские ярлыки: “харизматичный рыжий”, “уверенный парень”, “интересный Райден”. Нужно через действие и оценку Акиры: “рыжий поймал мяч слишком легко”, “у площадки стало шумнее”, “тёмноволосый рядом с ним не смотрел прямо, и это раздражало сильнее”.
 
-АКИРА:
-Акира v2 poisonous: сухая, точная, ядовитая, внешне спокойная.
-Её мысли не должны быть “надеюсь”, “интересно”, “кажется дружелюбно”.
-Её внутренний тон: контроль тела, оценка цены разговора, раздражение от внимания, холодная практичность.
+ОФОРМЛЕНИЕ:
+- Описание и ремарки курсивом: *текст описания/ремарки*.
+- Реплики: **Имя** — обычный текст реплики.
+- Если после реплики нужна ремарка, она отдельной курсивной фразой.
+- Не пиши имя Акиры и её реплику, если пользователь сам её не дал.
 
-ЛИВИЯ:
-Старая близкая подруга Акиры. Живая, шумная, тёплая, но не глупая. Считывает взгляды, прикрывает и поддевает, но не забирает выбор игрока.
+ПЕРСОНАЖИ:
+Реплики и действия персонажей должны исходить из их карточек/отношений. Не универсальные фразы. Если персонаж не должен говорить — дай действие, паузу, взгляд, движение.
+Ливия: близкая подруга, живая, поддевает и прикрывает.
+Хару: действие через мяч/площадку/публичность, не “флиртующий красавчик”.
+Райден: холодное молчание рядом с Хару, давление через не-смотрение/паузу/контроль дистанции.
+Акира: сухая, точная, ядовитая. Мысли не пустые и не философские; это рабочая оценка риска, людей, расстояний, цены разговора.
 
-ХАРУ И РАЙДЕН:
-Если они в character_slice, оба должны получить видимый beat.
-Хару: рыжий у площадки/мяча/кольца, лёгкость, публичность, любопытство к Акире через действие.
-Райден: рядом с Хару как тёмноволосый холодный фон; не обязан говорить, но его молчание/не-смотрение должно давить.
+ДЕЙСТВИЯ И ВЕС:
+Варианты действий должны вести к разным последствиям. Каждый вариант должен иметь вес/вектор: риск, социальное давление, информация, скорость, отношения, контроль. Не декоративные варианты.
+Формат варианта: ◈ действие — вес: краткое последствие.
+
+ЗАПРЕЩЕНО:
+- “студенты дружелюбные”, “тёплая улыбка”, “надеюсь”, “довольно”, “кажется интересным/уверенным”;
+- generic: “подойти поговорить”, “игнорировать и идти”, “ответить на взгляды”;
+- пустая философия в мыслях;
+- friendly-school prose;
+- переодевать Акиру, активировать фон, раскрывать скрытый лор.
 
 ФОРМАТ scene_text:
 🏛️ Академия Астрейн · 1198 г., {дата}, {день недели}
@@ -217,15 +271,15 @@ def _system_prompt() -> str:
 
 ━━━━━━━━━━━━━━━━━━━━
 
-6–14 абзацев сцены. Структура: действие/появление → реакция Ливии → реакция площадки/студентов → beat Хару → beat Райдена → конкретное давление/зацепка → стоп на выборе.
+6–14 абзацев сцены. Пиши в курсиве описательные абзацы. Структура: действие игрока/вход → реакция Ливии → реакция среды → beat Хару → beat Райдена → конкретная зацепка/давление → стоп на выборе.
 
 ━━━━━━━━━━━━━━━━━━━━
 
 ✦ Что можно сделать
 Варианты ниже не считаются действием, пока игрок не выбрал.
-◈ конкретное действие
-◈ конкретное действие
-◈ конкретное действие
+◈ действие — вес: последствие
+◈ действие — вес: последствие
+◈ действие — вес: последствие
 
 ✦ Что Акира могла бы сказать
 — “резкая короткая реплика в стиле Акиры”
@@ -233,17 +287,9 @@ def _system_prompt() -> str:
 — “резкая короткая реплика в стиле Акиры”
 
 ✦ Мысли Акиры
-— сухая мысль/оценка
-— сухая мысль/оценка
-— сухая мысль/оценка
-
-ПРАВИЛА:
-- Не используй “Что вы делаете?”.
-- Не раскрывай скрытый лор.
-- Не называй фон Акиры активным, если state говорит, что фон не активен.
-- Не надевай форму, если uniform_worn=false.
-- Не смешивай кириллицу и латиницу в именах.
-- Нижние варианты должны быть полезными для следующего хода, не декоративными.
+— настоящая рабочая мысль Акиры
+— настоящая рабочая мысль Акиры
+— настоящая рабочая мысль Акиры
 """.strip()
 
 
@@ -257,6 +303,7 @@ def _build_prompt_bundle(session_id: str, user_input: str, mode: str) -> tuple[d
     scene_contract = runtime.compact_scene_contract_for_tool(
         runtime.build_scene_contract(session_id, current_state, mode)
     )
+    source_context = _load_source_context(session_id, _source_context_paths(required_files))
 
     bundle = {
         "pipeline": PIPELINE_ID,
@@ -265,27 +312,32 @@ def _build_prompt_bundle(session_id: str, user_input: str, mode: str) -> tuple[d
         "mode": mode,
         "user_input": user_input,
         "scene_contract": scene_contract,
+        "source_context": source_context,
+        "source_context_rule": "Treat source_context as the authoritative character/location/style source. Do not summarize it; use it to write character-accurate actions and dialogue.",
         "required_files": required_files[:40],
         "style_reference_note": (
             "Target style: dry, cinematic, pressure-heavy Academy prose. "
-            "Good beat shape: Akira visible action; Livia almost comments; court reacts; Haru notices through ball/movement; "
-            "Raiden is a cold nearby pressure; stop on a concrete choice. No friendly-school prose."
+            "Every line must be from Akira's perception, not objective author labels. "
+            "Actions must have different consequence weights."
         ),
         "style_micro_example": (
-            "НЕ копировать, только ритм: Асфальт ещё держал ночную воду. Мяч ударился о сетку слишком громко для случайности. "
+            "НЕ копировать, только ритм: *Асфальт ещё держал ночную воду. Мяч ударился о сетку слишком громко для случайности. "
             "Ливия хотела сказать что-то едкое, но успела только вдохнуть. У площадки рыжий поймал мяч одной рукой; рядом тёмноволосый не посмотрел прямо, "
-            "и от этого внимание стало неприятнее. Акира оценила проход, людей, расстояние до двери — всё, кроме причины, по которой Академия уже пыталась стать проблемой."
+            "и от этого внимание стало неприятнее. Акира оценила проход, людей, расстояние до двери — всё, кроме причины, по которой Академия уже пыталась стать проблемой.*"
         ),
         "forbidden_generic_phrases": [
+            "харизматичный рыжий",
+            "уверенный парень",
+            "интересный Райден",
             "студенты дружелюбные",
             "тёплая улыбка",
             "надеюсь",
             "довольно уверенно",
             "кажется интересным",
             "что вы делаете",
-            "подойти к Хару и вступить в разговор",
-            "игнорировать Хару и продолжать идти",
-            "ответить на взгляды студентов",
+            "подойти к Хару",
+            "игнорировать Хару",
+            "ответить на взгляды",
             "сосредоточиться на регистрации",
         ],
         "output_json_contract": {
@@ -329,6 +381,9 @@ def _scene_quality_issues(scene_text: str) -> list[str]:
     lower = scene_text.lower()
     issues: list[str] = []
     forbidden = [
+        "харизматичный рыж",
+        "уверенный парень",
+        "интересный райден",
         "тёплая улыбка",
         "дружелюб",
         "надеюсь",
@@ -345,6 +400,12 @@ def _scene_quality_issues(scene_text: str) -> list[str]:
     for phrase in forbidden:
         if phrase in lower:
             issues.append(f"generic/soft phrase: {phrase}")
+    if "**" not in scene_text:
+        issues.append("missing bold speaker names")
+    if "*" not in scene_text:
+        issues.append("missing italic descriptions/remarks")
+    if "вес:" not in lower:
+        issues.append("action options missing consequence weights")
     if "✦ что можно сделать" not in lower:
         issues.append("missing exact action-options block")
     if "✦ что акира могла бы сказать" not in lower:
@@ -357,9 +418,9 @@ def _scene_quality_issues(scene_text: str) -> list[str]:
         issues.append("Haru missing")
     if "райден" not in lower:
         issues.append("Raiden missing")
-    if len(scene_text) < 1800:
+    if len(scene_text) < 2200:
         issues.append("scene too short / underdeveloped")
-    return issues[:8]
+    return issues[:10]
 
 
 def _repair_prompt_bundle(prompt_bundle: dict[str, Any], scene_text: str, issues: list[str]) -> dict[str, Any]:
@@ -369,10 +430,11 @@ def _repair_prompt_bundle(prompt_bundle: dict[str, Any], scene_text: str, issues
     repaired["failed_scene_excerpt"] = scene_text[:2400]
     repaired["system_prompt"] = (
         str(repaired.get("system_prompt", ""))
-        + "\n\nПРЕДЫДУЩИЙ ОТВЕТ ПРОВАЛИЛ STYLE-GATE. Перепиши сцену заново, не редактируй по мелочи. "
-        + "Убери мягкий/generic тон. Сделай плотнее, суше, ядовитее, с конкретной физикой. "
-        + "Акира не думает романтично/дружелюбно о Хару и Райдене. "
-        + "Верни только JSON object без markdown fences."
+        + "\n\nПРЕДЫДУЩИЙ ОТВЕТ ПРОВАЛИЛ STYLE-GATE. Перепиши сцену заново. "
+        + "Обязательно используй source_context/character_slice. Убери авторские ярлыки, мягкий тон и generic-варианты. "
+        + "Оформи реплики как **Имя** — текст. Описания/ремарки в *курсиве*. "
+        + "Действия должны иметь разные веса: риск, информация, социальное давление, скорость, отношения, контроль. "
+        + "Мысли Акиры — рабочие, сухие, конкретные. Верни только JSON object."
     )
     return repaired
 
