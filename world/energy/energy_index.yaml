@@ -1,0 +1,5 @@
+energy_system:
+  academy_use: visible low-level traces, not constant battles
+  overload: too much or too long use for current capacity
+  loss_of_control: emotion-driven chaotic energy, can affect the user
+  scene_rule: use only small physical details unless triggered by scene pressure
