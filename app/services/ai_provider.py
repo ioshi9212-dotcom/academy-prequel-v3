@@ -67,8 +67,6 @@ def _json_object_candidates(text: str) -> list[str]:
 
 
 def _parse_model_content(content: str) -> dict[str, Any]:
-    # Models often return ```json { ... } ``` even when instructed not to.
-    # Extract that JSON so the user receives clean scene_text, not a fenced blob.
     for candidate in _json_object_candidates(content):
         try:
             parsed_raw = json.loads(candidate)
@@ -113,6 +111,11 @@ def _openai_compatible_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]
         "temperature": float(os.getenv("AI_TEMPERATURE", "0.75")),
     }
 
+    # Groq/OpenAI-compatible providers often support JSON mode. Default on for cleaner parsing;
+    # set OPENAI_COMPATIBLE_JSON_MODE=false if a provider rejects response_format.
+    if os.getenv("OPENAI_COMPATIBLE_JSON_MODE", "true").strip().lower() not in {"0", "false", "no", "off"}:
+        body["response_format"] = {"type": "json_object"}
+
     max_tokens = os.getenv("AI_MAX_TOKENS") or os.getenv("OPENAI_COMPATIBLE_MAX_TOKENS")
     if max_tokens:
         try:
@@ -123,7 +126,7 @@ def _openai_compatible_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]
     url = f"{base_url}/chat/completions"
     user_agent = os.getenv(
         "OPENAI_COMPATIBLE_USER_AGENT",
-        "AcademyPrequelV3-Railway/3.5.1 (+https://prequel-v3-production.up.railway.app)",
+        "AcademyPrequelV3-Railway/3.5.2 (+https://prequel-v3-production.up.railway.app)",
     )
     request = urllib.request.Request(
         url,
