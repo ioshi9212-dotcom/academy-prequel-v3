@@ -31,9 +31,7 @@ def _mock_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]:
         "model": "mock-v0",
         "scene_text": scene_text,
         "state_changes": {},
-        "raw": {
-            "note": "Mock provider does not write canon. Use dry_run to inspect the assembled prompt bundle.",
-        },
+        "raw": {"note": "Mock provider does not write canon."},
     }
 
 
@@ -42,6 +40,51 @@ def _http_error_body(exc: urllib.error.HTTPError) -> str:
         return exc.read().decode("utf-8", errors="replace")[:1500]
     except Exception:
         return ""
+
+
+def _strip_markdown_fence(text: str) -> str:
+    value = text.strip()
+    if not value.startswith("```"):
+        return value
+    lines = value.splitlines()
+    if lines and lines[0].strip().startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _json_object_candidates(text: str) -> list[str]:
+    cleaned = _strip_markdown_fence(text)
+    candidates = [cleaned]
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start >= 0 and end > start:
+        extracted = cleaned[start : end + 1].strip()
+        if extracted not in candidates:
+            candidates.append(extracted)
+    return candidates
+
+
+def _parse_model_content(content: str) -> dict[str, Any]:
+    # Models often return ```json { ... } ``` even when instructed not to.
+    # Extract that JSON so the user receives clean scene_text, not a fenced blob.
+    for candidate in _json_object_candidates(content):
+        try:
+            parsed_raw = json.loads(candidate)
+        except Exception:
+            continue
+        if isinstance(parsed_raw, dict):
+            scene_text = parsed_raw.get("scene_text")
+            if isinstance(scene_text, str):
+                nested = _strip_markdown_fence(scene_text)
+                if nested != scene_text and nested.strip().startswith("{"):
+                    nested_parsed = _parse_model_content(nested)
+                    if isinstance(nested_parsed.get("scene_text"), str):
+                        return nested_parsed
+                parsed_raw["scene_text"] = nested.strip()
+            return parsed_raw
+    return {"scene_text": _strip_markdown_fence(content)}
 
 
 def _openai_compatible_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]:
@@ -112,23 +155,18 @@ def _openai_compatible_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]
     except Exception as exc:
         raise AIProviderError(f"Invalid JSON from OpenAI-compatible provider: {raw_response[:800]}") from exc
 
-    content = ""
     try:
         content = payload["choices"][0]["message"]["content"]
     except Exception as exc:
         raise AIProviderError(f"Invalid OpenAI-compatible response shape: {exc}; payload={str(payload)[:1000]}") from exc
 
-    parsed: dict[str, Any]
-    try:
-        parsed_raw = json.loads(content)
-        parsed = parsed_raw if isinstance(parsed_raw, dict) else {"scene_text": str(content)}
-    except Exception:
-        parsed = {"scene_text": content}
+    parsed = _parse_model_content(str(content))
+    scene_text = str(parsed.get("scene_text") or "").strip()
 
     return {
         "provider": "openai_compatible",
         "model": model,
-        "scene_text": str(parsed.get("scene_text", content)),
+        "scene_text": scene_text,
         "state_changes": parsed.get("state_changes", {}) if isinstance(parsed.get("state_changes"), dict) else {},
         "raw": parsed,
     }
