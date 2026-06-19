@@ -1,0 +1,21 @@
+characters:
+  akira:
+    folder: akira
+    role: pov
+    runtime: runtime/characters/akira.yaml
+  livia:
+    folder: livia
+    role: active_friend
+    runtime: runtime/characters/livia.yaml
+  haru:
+    folder: haru
+    role: scheduled_basketball_contact
+    runtime: runtime/characters/haru.yaml
+  kir:
+    folder: kir
+    role: delayed_friend
+    runtime: runtime/characters/kir.yaml
+  raiden:
+    folder: raiden
+    role: background_or_pressure
+    runtime: runtime/characters/raiden.yaml
