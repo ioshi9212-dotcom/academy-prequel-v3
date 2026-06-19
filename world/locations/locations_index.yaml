@@ -1,0 +1,6 @@
+locations:
+  academy_back_court_exit:
+    card: world/locations/academy_back_court_exit/location_card.yaml
+    visual: world/locations/academy_back_court_exit/visual_description.md
+  loc_academy_main:
+    card: world/locations/academy_main/location_card.yaml
