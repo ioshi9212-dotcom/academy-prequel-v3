@@ -15,10 +15,10 @@ def _compact_load_source_context(
     max_total_chars: int | None = None,
     max_file_chars: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Keep character/source context, but under Groq Free TPM limits."""
+    """Keep character/source context, but stay under Groq Free TPM limits."""
     runtime = variant_b_runtime.runtime
-    total_limit = max_total_chars or int(os.getenv("SOURCE_CONTEXT_MAX_CHARS", "9000"))
-    file_limit = max_file_chars or int(os.getenv("SOURCE_CONTEXT_FILE_MAX_CHARS", "1400"))
+    total_limit = max_total_chars or int(os.getenv("SOURCE_CONTEXT_MAX_CHARS", "6500"))
+    file_limit = max_file_chars or int(os.getenv("SOURCE_CONTEXT_FILE_MAX_CHARS", "1000"))
 
     result: list[dict[str, Any]] = []
     total = 0
@@ -40,8 +40,20 @@ def _compact_load_source_context(
     return result
 
 
+def _repair_toggle_quality_issues(scene_text: str) -> list[str]:
+    """Allow disabling the second Groq call when free TPM is tight."""
+    enabled = os.getenv("QUALITY_AUTO_REPAIR", "true").strip().lower()
+    if enabled in {"0", "false", "no", "off"}:
+        return []
+    return variant_b_runtime._original_scene_quality_issues(scene_text)
+
+
 variant_b_runtime._load_source_context = _compact_load_source_context
-variant_b_runtime.VARIANT_B_VERSION = "3.5.6-variant-b-compact-source"
+if not hasattr(variant_b_runtime, "_original_scene_quality_issues"):
+    variant_b_runtime._original_scene_quality_issues = variant_b_runtime._scene_quality_issues
+variant_b_runtime._scene_quality_issues = _repair_toggle_quality_issues
+
+variant_b_runtime.VARIANT_B_VERSION = "3.5.7-variant-b-groq-free-safe"
 variant_b_runtime.app.version = variant_b_runtime.VARIANT_B_VERSION
 
 app = variant_b_runtime.app
