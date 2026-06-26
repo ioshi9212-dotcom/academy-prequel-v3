@@ -1,0 +1,202 @@
+id: "char_example" # character id / ID персонажа для ИИ
+slug: "example" # folder slug / имя папки
+file_type: "character_card_template" # card type / тип шаблона
+version: "unified_character_card_v1" # template version / версия шаблона
+status: "active" # active/off / активна или выключена
+
+card_hint: "Короткая подсказка до 1–2 предложений: кто персонаж, роль, характер, главные запреты. Этот верхний блок важен: движок может брать первые строки как быстрый hint."
+
+# FILL RULES / ПРАВИЛА ЗАПОЛНЕНИЯ
+# 1) English keys stay unchanged for AI. / Английские ключи не менять.
+# 2) Russian comments explain the field for author. / Русские комментарии рядом объясняют поле.
+# 3) Keep every section. / Разделы не удалять.
+# 4) If the character is minor, set enabled: false. / Если персонаж не важный — enabled: false.
+# 5) Unknown means not filled yet, off means intentionally disabled. / unknown = не заполнено, off = выключено специально.
+# 6) Lists can stay empty: []. / Списки можно оставлять пустыми: [].
+
+importance:
+  tier: "minor" # main/support/minor/background / главный, важный, второстепенный, фон
+  load_priority: "low" # high/medium/low / как важно грузить в сцену
+  enabled_sections_rule: "Do not delete sections; turn unused sections off with enabled: false." # правило выключения разделов
+
+identity: # identity / личность и имена
+  enabled: true # true/false / включено или выключено
+  full_name: "unknown" # full name / полное имя
+  first_name: "unknown" # first name / имя
+  last_name: "unknown" # last name / фамилия
+  close_name: "unknown" # close name / короткое имя для близких
+  close_name_rule: "unknown" # who may use close name / кто может так звать
+  aliases: [] # aliases / варианты обращения
+  documents_name: "unknown" # document name / имя в документах
+  public_label: "unknown" # public role / кем видят снаружи
+  private_label: "unknown" # hidden role / скрытая правда
+
+story_role: # story role / роль в сюжете
+  enabled: true
+  setting: "unknown" # setting / линия или сеттинг
+  arc: "unknown" # arc / арка
+  role: "npc" # player_character/npc / роль в игре
+  pov_character: false # point of view / персонаж от лица игрока
+  scene_function: [] # why character exists in scene / зачем нужен в сценах
+  development_vector: [] # growth vector / куда развивается персонаж
+
+appearance: # appearance / внешность
+  enabled: true
+  gender: "unknown" # gender / пол
+  age: "unknown" # age / возраст
+  height_cm: "unknown" # height / рост
+  overall_impression: "unknown" # first impression / первое впечатление
+  attractiveness_level: "unknown" # attractiveness / привлекательность
+  hair: # hair / волосы
+    color: "unknown"
+    length: "unknown"
+    texture: "unknown"
+    forehead: "unknown"
+    bangs: "unknown"
+    boundary_rule: "unknown"
+    social_effect: "unknown"
+    allowed_exceptions: {}
+  face: # face / лицо
+    skin: "unknown"
+    eyes: "unknown"
+    look: "unknown"
+    expression: "unknown"
+    smile: "unknown"
+    real_smile: "unknown"
+  body: # body / телосложение
+    build: "unknown"
+    proportions: "unknown"
+    movement: "unknown"
+    physical_note: "unknown"
+  current_start_visual_rule: "Use current_state for current outfit/hair/items." # current outfit source / источник текущего вида
+
+public_mask: # public mask / что видят другие
+  enabled: true
+  mask_summary: "unknown" # visible mask / видимая маска
+  social_effect: []
+  not_visible_at_start: []
+
+personality: # personality / характер
+  enabled: true
+  core_traits: []
+  not_base: []
+  contradiction_core: "unknown" # inner contradiction / внутреннее противоречие
+  pressure_response: [] # reaction under pressure / реакция под давлением
+
+voice: # voice / речь
+  enabled: true
+  style: []
+  typical_effect: []
+  player_agency_rule: "If this is the player character, do not write their lines without player input." # player control / контроль реплик игроком
+
+humanity_and_softness: # softness / человечность и мягкость
+  enabled: true
+  core_rule: "unknown"
+  wants: []
+  cannot_allow: []
+  visible_behavior: []
+  writer_rule: []
+
+habits: # habits / привычки; for minor character set enabled: false / для неважного персонажа выключить, но не удалять
+  enabled: false
+  items: []
+
+likes_dislikes: # likes/dislikes / симпатии и антипатии
+  enabled: false
+  likes: []
+  dislikes: []
+
+animals: # animals / животные
+  enabled: false
+  loves_animals: false
+  especially_loves: []
+  core_dynamic: "off"
+  hidden_reason: "off"
+  character_knowledge: "off"
+  visible_behavior: []
+  writer_rule: []
+
+physical_profile: # physical profile / физика и навыки
+  enabled: false
+  training_level: "off"
+  strengths: []
+  limits: []
+  sport: {}
+  writer_rule: []
+
+energy: # energy / способность
+  enabled: false
+  type: "off" # energy type / тип энергии
+  public_type_label: "off" # public label / официальная маска
+  hidden_limit: "off" # hidden limit / скрытый предел
+  internal_definition: "off"
+  public_mask: []
+  usual_control: []
+  sensory_feel: []
+  known_abilities: []
+  internal_space:
+    description: "off"
+    other_people_limit: "off"
+  echo_interaction:
+    rule: "off"
+    cost: "off"
+  overload_rule: []
+
+relationships: # relationships / отношения
+  enabled: false
+  example_character_id:
+    enabled: false
+    status: "off"
+    dynamic: "off"
+    character_side: "off"
+    rule: "off"
+
+knowledge_visibility: # knowledge visibility / кто что знает
+  enabled: true
+  character_knows: []
+  character_mistakenly_believes: []
+  character_does_not_know: []
+  npc_rule: "If information was not revealed in-scene, NPCs do not know it." # NPC knowledge rule / правило знания NPC
+
+triggers: # triggers / триггеры сцен
+  enabled: false
+  soft_triggers: []
+  danger_triggers: []
+  scene_reaction_rule: "off" # reaction rule / как применять
+
+scene_rules: # scene rules / правила сцены
+  enabled: true
+  start_rules: []
+  player_control: []
+  writer_do: []
+  writer_do_not: []
+
+optional_sections: # optional sections / дополнительные разделы
+  romance:
+    enabled: false
+    note: "off"
+  family:
+    enabled: false
+    note: "off"
+  combat:
+    enabled: false
+    note: "off"
+  work_or_study:
+    enabled: false
+    note: "off"
+  secrets:
+    enabled: false
+    note: "off"
+  rumors:
+    enabled: false
+    note: "off"
+  medical:
+    enabled: false
+    note: "off"
+
+links: # links / связанные файлы
+  main: "characters/example/main.yaml"
+  character: "characters/example/character.yaml"
+  character_card: "characters/example/character_card.yaml"
+  past: "characters/example/past.yaml"
+  runtime: "runtime/characters/example.yaml"
