@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from typing import Any
@@ -94,14 +95,28 @@ def _readable_russian_score(text: str) -> int:
     return cyrillic + punctuation
 
 
-def _repair_mojibake_text(text: str) -> str:
-    """Repair common UTF-8 text that was decoded as latin1/cp1252.
+def _decode_latin_mojibake_bytes(text: str) -> str | None:
+    """Rebuild UTF-8 bytes from characters that were decoded as latin1/cp1252."""
+    if not text:
+        return None
+    raw = bytearray()
+    for ch in text:
+        code = ord(ch)
+        if code <= 255:
+            raw.append(code)
+        else:
+            raw.extend(ch.encode("utf-8"))
+    try:
+        return bytes(raw).decode("utf-8")
+    except UnicodeError:
+        try:
+            return bytes(raw).decode("utf-8", errors="replace")
+        except Exception:
+            return None
 
-    LM Studio can occasionally return Cyrillic as mojibake inside message.content,
-    especially when the model emits a JSON-looking string in plain text mode.
-    This function is deliberately conservative: it keeps the candidate only when
-    mojibake markers decrease or readable Cyrillic clearly increases.
-    """
+
+def _repair_mojibake_text(text: str) -> str:
+    """Repair common UTF-8 text that was decoded as latin1/cp1252."""
     if not text:
         return text
 
@@ -111,15 +126,18 @@ def _repair_mojibake_text(text: str) -> str:
         return text
 
     candidates = [text]
+    rebuilt = _decode_latin_mojibake_bytes(text)
+    if rebuilt:
+        candidates.append(rebuilt)
     for source_encoding in ("latin1", "cp1252"):
         try:
             candidates.append(text.encode(source_encoding).decode("utf-8"))
         except UnicodeError:
-            continue
+            pass
         try:
             candidates.append(text.encode(source_encoding, errors="ignore").decode("utf-8", errors="ignore"))
         except UnicodeError:
-            continue
+            pass
 
     best = text
     best_key = (original_bad, -original_good)
@@ -157,24 +175,68 @@ def _json_object_candidates(text: str) -> list[str]:
     return candidates
 
 
+def _decode_json_string_prefix(value: str) -> str:
+    """Decode a possibly truncated JSON string body as much as possible."""
+    try:
+        return json.loads(f'"{value}"')
+    except Exception:
+        pass
+    # If the model output was truncated mid-escape, trim until it becomes a valid
+    # JSON string. Limit work to keep pathological outputs cheap.
+    tail = value
+    for _ in range(min(8, len(tail))):
+        tail = tail[:-1]
+        try:
+            return json.loads(f'"{tail}"')
+        except Exception:
+            continue
+    return value.replace("\\n", "\n").replace('\\"', '"')
+
+
+def _extract_jsonish_scene_text(text: str) -> str | None:
+    """Extract scene_text when local models emit incomplete JSON as plain text."""
+    cleaned = _strip_markdown_fence(text).strip()
+    match = re.search(r'"scene_text"\s*:\s*"', cleaned)
+    if not match:
+        return None
+    tail = cleaned[match.end() :]
+    end_match = re.search(r'"\s*,\s*"state_changes"\s*:', tail)
+    if end_match:
+        tail = tail[: end_match.start()]
+    tail = tail.rstrip()
+    if tail.endswith("}"):
+        tail = tail[:-1].rstrip()
+    if tail.endswith('"'):
+        tail = tail[:-1]
+    decoded = _decode_json_string_prefix(tail)
+    decoded = _repair_mojibake_text(decoded)
+    return decoded.strip() or None
+
+
 def _parse_model_content(content: str) -> dict[str, Any]:
     repaired_content = _repair_mojibake_text(content)
     for candidate in _json_object_candidates(repaired_content):
         try:
             parsed_raw = json.loads(candidate)
         except Exception:
+            extracted = _extract_jsonish_scene_text(candidate)
+            if extracted:
+                return {"scene_text": extracted}
             continue
         if isinstance(parsed_raw, dict):
             parsed_raw = _repair_mojibake_values(parsed_raw)
             scene_text = parsed_raw.get("scene_text")
             if isinstance(scene_text, str):
                 nested = _strip_markdown_fence(_repair_mojibake_text(scene_text))
-                if nested != scene_text and nested.strip().startswith("{"):
+                if nested.strip().startswith("{"):
                     nested_parsed = _parse_model_content(nested)
                     if isinstance(nested_parsed.get("scene_text"), str):
                         return nested_parsed
                 parsed_raw["scene_text"] = nested.strip()
             return parsed_raw
+    extracted = _extract_jsonish_scene_text(repaired_content)
+    if extracted:
+        return {"scene_text": extracted}
     return {"scene_text": _strip_markdown_fence(repaired_content)}
 
 
@@ -261,7 +323,7 @@ def _openai_compatible_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]
     try:
         content = payload["choices"][0]["message"]["content"]
     except Exception as exc:
-        raise AIProviderError(f"Invalid OpenAI-compatible response shape: {exc}; payload={str(payload)[:1000]}" ) from exc
+        raise AIProviderError(f"Invalid OpenAI-compatible response shape: {exc}; payload={str(payload)[:1000]}") from exc
 
     parsed = _parse_model_content(str(content))
     scene_text = _repair_mojibake_text(str(parsed.get("scene_text") or "")).strip()
