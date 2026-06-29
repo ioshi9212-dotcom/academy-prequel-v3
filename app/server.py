@@ -6,6 +6,31 @@ from __future__ import annotations
 import os
 from typing import Any
 
+
+def _env_enabled(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _looks_like_local_base_url() -> bool:
+    base_url = os.getenv("OPENAI_COMPATIBLE_BASE_URL", "").lower()
+    return "127.0.0.1" in base_url or "localhost" in base_url or "lmstudio" in base_url
+
+
+LOCAL_LM_STUDIO_MODE = _env_enabled("LOCAL_LM_STUDIO_MODE") or _looks_like_local_base_url()
+
+if LOCAL_LM_STUDIO_MODE:
+    # Safe local defaults for LM Studio / qwen3-8b. setdefault keeps explicit env
+    # values and preserves Railway/Groq behaviour when the flag/base_url is absent.
+    os.environ.setdefault("OPENAI_COMPATIBLE_JSON_MODE", "false")
+    os.environ.setdefault("SOURCE_CONTEXT_MAX_CHARS", "3000")
+    os.environ.setdefault("SOURCE_CONTEXT_FILE_MAX_CHARS", "500")
+    os.environ.setdefault("QUALITY_AUTO_REPAIR", "false")
+    os.environ.setdefault("OPENAI_COMPATIBLE_MAX_TOKENS", "600")
+    os.environ.setdefault("OPENAI_COMPATIBLE_TIMEOUT", "240")
+
 import app.variant_b_runtime as variant_b_runtime
 
 
@@ -15,10 +40,12 @@ def _compact_load_source_context(
     max_total_chars: int | None = None,
     max_file_chars: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Keep character/source context, but stay under Groq Free TPM limits."""
+    """Keep source context, but allow compact LM Studio defaults."""
     runtime = variant_b_runtime.runtime
-    total_limit = max_total_chars or int(os.getenv("SOURCE_CONTEXT_MAX_CHARS", "6500"))
-    file_limit = max_file_chars or int(os.getenv("SOURCE_CONTEXT_FILE_MAX_CHARS", "1000"))
+    total_default = "3000" if LOCAL_LM_STUDIO_MODE else "6500"
+    file_default = "500" if LOCAL_LM_STUDIO_MODE else "1000"
+    total_limit = max_total_chars or int(os.getenv("SOURCE_CONTEXT_MAX_CHARS", total_default))
+    file_limit = max_file_chars or int(os.getenv("SOURCE_CONTEXT_FILE_MAX_CHARS", file_default))
 
     result: list[dict[str, Any]] = []
     total = 0
@@ -70,7 +97,7 @@ def _safe_build_prompt_bundle(session_id: str, user_input: str, mode: str):
 
 
 def _repair_toggle_quality_issues(scene_text: str) -> list[str]:
-    """Allow disabling the second Groq call when free TPM is tight."""
+    """Allow disabling the second model call when local context/latency is tight."""
     enabled = os.getenv("QUALITY_AUTO_REPAIR", "true").strip().lower()
     if enabled in {"0", "false", "no", "off"}:
         return []
@@ -102,7 +129,7 @@ if not hasattr(variant_b_runtime, "_original_scene_quality_issues"):
     variant_b_runtime._original_scene_quality_issues = variant_b_runtime._scene_quality_issues
 variant_b_runtime._scene_quality_issues = _repair_toggle_quality_issues
 
-variant_b_runtime.VARIANT_B_VERSION = "3.5.8-variant-b-no-copy-example"
+variant_b_runtime.VARIANT_B_VERSION = "3.5.9-lm-studio-local-mode"
 variant_b_runtime.app.version = variant_b_runtime.VARIANT_B_VERSION
 
 app = variant_b_runtime.app
