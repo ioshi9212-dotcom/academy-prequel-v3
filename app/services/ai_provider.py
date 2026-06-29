@@ -78,22 +78,61 @@ def _strip_markdown_fence(text: str) -> str:
 
 
 def _mojibake_score(text: str) -> int:
-    return text.count("Ð") + text.count("Ñ") + sum(1 for ch in text if "\x80" <= ch <= "\x9f")
+    if not text:
+        return 0
+    markers = "ÐÑðÂâÃ¤å�"
+    marker_score = sum(text.count(marker) for marker in markers)
+    control_score = sum(1 for ch in text if "\x80" <= ch <= "\x9f")
+    return marker_score + control_score
+
+
+def _readable_russian_score(text: str) -> int:
+    if not text:
+        return 0
+    cyrillic = sum(1 for ch in text if "\u0400" <= ch <= "\u04ff")
+    punctuation = sum(text.count(ch) for ch in "—«»ёЁАкадемияАстрейн")
+    return cyrillic + punctuation
 
 
 def _repair_mojibake_text(text: str) -> str:
+    """Repair common UTF-8 text that was decoded as latin1/cp1252.
+
+    LM Studio can occasionally return Cyrillic as mojibake inside message.content,
+    especially when the model emits a JSON-looking string in plain text mode.
+    This function is deliberately conservative: it keeps the candidate only when
+    mojibake markers decrease or readable Cyrillic clearly increases.
+    """
     if not text:
         return text
-    original_score = _mojibake_score(text)
-    if original_score < 3:
+
+    original_bad = _mojibake_score(text)
+    original_good = _readable_russian_score(text)
+    if original_bad < 2:
         return text
-    try:
-        repaired = text.encode("latin1").decode("utf-8")
-    except UnicodeError:
-        return text
-    if repaired and _mojibake_score(repaired) < original_score:
-        return repaired
-    return text
+
+    candidates = [text]
+    for source_encoding in ("latin1", "cp1252"):
+        try:
+            candidates.append(text.encode(source_encoding).decode("utf-8"))
+        except UnicodeError:
+            continue
+        try:
+            candidates.append(text.encode(source_encoding, errors="ignore").decode("utf-8", errors="ignore"))
+        except UnicodeError:
+            continue
+
+    best = text
+    best_key = (original_bad, -original_good)
+    for candidate in candidates:
+        if not candidate:
+            continue
+        bad = _mojibake_score(candidate)
+        good = _readable_russian_score(candidate)
+        key = (bad, -good)
+        if key < best_key and (bad < original_bad or good > original_good + 3):
+            best = candidate
+            best_key = key
+    return best
 
 
 def _repair_mojibake_values(value: Any) -> Any:
@@ -119,7 +158,8 @@ def _json_object_candidates(text: str) -> list[str]:
 
 
 def _parse_model_content(content: str) -> dict[str, Any]:
-    for candidate in _json_object_candidates(content):
+    repaired_content = _repair_mojibake_text(content)
+    for candidate in _json_object_candidates(repaired_content):
         try:
             parsed_raw = json.loads(candidate)
         except Exception:
@@ -128,14 +168,14 @@ def _parse_model_content(content: str) -> dict[str, Any]:
             parsed_raw = _repair_mojibake_values(parsed_raw)
             scene_text = parsed_raw.get("scene_text")
             if isinstance(scene_text, str):
-                nested = _strip_markdown_fence(scene_text)
+                nested = _strip_markdown_fence(_repair_mojibake_text(scene_text))
                 if nested != scene_text and nested.strip().startswith("{"):
                     nested_parsed = _parse_model_content(nested)
                     if isinstance(nested_parsed.get("scene_text"), str):
                         return nested_parsed
                 parsed_raw["scene_text"] = nested.strip()
             return parsed_raw
-    return {"scene_text": _strip_markdown_fence(_repair_mojibake_text(content))}
+    return {"scene_text": _strip_markdown_fence(repaired_content)}
 
 
 def _openai_compatible_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]:
@@ -221,10 +261,10 @@ def _openai_compatible_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]
     try:
         content = payload["choices"][0]["message"]["content"]
     except Exception as exc:
-        raise AIProviderError(f"Invalid OpenAI-compatible response shape: {exc}; payload={str(payload)[:1000]}") from exc
+        raise AIProviderError(f"Invalid OpenAI-compatible response shape: {exc}; payload={str(payload)[:1000]}" ) from exc
 
     parsed = _parse_model_content(str(content))
-    scene_text = str(parsed.get("scene_text") or "").strip()
+    scene_text = _repair_mojibake_text(str(parsed.get("scene_text") or "")).strip()
 
     return {
         "provider": "openai_compatible",
