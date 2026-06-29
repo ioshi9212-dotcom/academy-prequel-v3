@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
 import urllib.request
 from typing import Any
@@ -9,6 +10,23 @@ from typing import Any
 
 class AIProviderError(RuntimeError):
     pass
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _is_local_compatible_endpoint(base_url: str, provider: str | None = None) -> bool:
+    selected = (provider or "").strip().lower()
+    if selected in {"lmstudio", "lm-studio", "local", "local_lm_studio"}:
+        return True
+    if _env_flag("LOCAL_LM_STUDIO_MODE", False):
+        return True
+    lowered = base_url.lower()
+    return any(marker in lowered for marker in ("127.0.0.1", "localhost", "0.0.0.0"))
 
 
 def _mock_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]:
@@ -54,8 +72,40 @@ def _strip_markdown_fence(text: str) -> str:
     return "\n".join(lines).strip()
 
 
+def _strip_model_thinking(text: str) -> str:
+    value = text.strip()
+    value = re.sub(r"<think>.*?</think>", "", value, flags=re.DOTALL | re.IGNORECASE).strip()
+    value = re.sub(r"<analysis>.*?</analysis>", "", value, flags=re.DOTALL | re.IGNORECASE).strip()
+    return value
+
+
+def _cyrillic_score(text: str) -> int:
+    return sum(1 for char in text if "А" <= char <= "я" or char == "ё" or char == "Ё")
+
+
+def _repair_common_mojibake(text: str) -> str:
+    if not isinstance(text, str) or not text:
+        return text
+    markers = ("Ð", "Ñ", "Рђ", "Р°", "Рµ", "Рё", "СЃ", "С‚")
+    if not any(marker in text for marker in markers):
+        return text
+
+    best = text
+    best_score = _cyrillic_score(text)
+    for encoding in ("latin1", "cp1252"):
+        try:
+            repaired = text.encode(encoding, errors="ignore").decode("utf-8", errors="ignore")
+        except Exception:
+            continue
+        score = _cyrillic_score(repaired)
+        if score > best_score:
+            best = repaired
+            best_score = score
+    return best
+
+
 def _json_object_candidates(text: str) -> list[str]:
-    cleaned = _strip_markdown_fence(text)
+    cleaned = _strip_markdown_fence(_strip_model_thinking(_repair_common_mojibake(text)))
     candidates = [cleaned]
     start = cleaned.find("{")
     end = cleaned.rfind("}")
@@ -75,23 +125,25 @@ def _parse_model_content(content: str) -> dict[str, Any]:
         if isinstance(parsed_raw, dict):
             scene_text = parsed_raw.get("scene_text")
             if isinstance(scene_text, str):
-                nested = _strip_markdown_fence(scene_text)
+                nested = _strip_markdown_fence(_strip_model_thinking(_repair_common_mojibake(scene_text)))
                 if nested != scene_text and nested.strip().startswith("{"):
                     nested_parsed = _parse_model_content(nested)
                     if isinstance(nested_parsed.get("scene_text"), str):
                         return nested_parsed
                 parsed_raw["scene_text"] = nested.strip()
             return parsed_raw
-    return {"scene_text": _strip_markdown_fence(content)}
+    return {"scene_text": _strip_markdown_fence(_strip_model_thinking(_repair_common_mojibake(content)))}
 
 
-def _openai_compatible_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]:
+def _openai_compatible_response(prompt_bundle: dict[str, Any], provider: str | None = None) -> dict[str, Any]:
     base_url = os.getenv("OPENAI_COMPATIBLE_BASE_URL", "").rstrip("/")
-    api_key = os.getenv("OPENAI_COMPATIBLE_API_KEY", "")
     model = os.getenv("OPENAI_COMPATIBLE_MODEL", "")
+    local_mode = _is_local_compatible_endpoint(base_url, provider)
+    api_key = os.getenv("OPENAI_COMPATIBLE_API_KEY", "") or ("lm-studio" if local_mode else "")
 
     try:
-        timeout = float(os.getenv("OPENAI_COMPATIBLE_TIMEOUT", "60"))
+        timeout_default = "240" if local_mode else "60"
+        timeout = float(os.getenv("OPENAI_COMPATIBLE_TIMEOUT", timeout_default))
     except ValueError as exc:
         raise AIProviderError("OPENAI_COMPATIBLE_TIMEOUT must be a number") from exc
 
@@ -111,12 +163,19 @@ def _openai_compatible_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]
         "temperature": float(os.getenv("AI_TEMPERATURE", "0.75")),
     }
 
-    # Groq/OpenAI-compatible providers often support JSON mode. Default on for cleaner parsing;
-    # set OPENAI_COMPATIBLE_JSON_MODE=false if a provider rejects response_format.
-    if os.getenv("OPENAI_COMPATIBLE_JSON_MODE", "true").strip().lower() not in {"0", "false", "no", "off"}:
+    # Groq/OpenAI-compatible providers often support JSON mode, but LM Studio's
+    # OpenAI-compatible server rejects response_format={"type":"json_object"} for
+    # some local models. Default JSON mode off for local mode, on for remote mode.
+    json_mode_env = os.getenv("OPENAI_COMPATIBLE_JSON_MODE")
+    json_mode_enabled = _env_flag("OPENAI_COMPATIBLE_JSON_MODE", default=not local_mode)
+    if json_mode_env is not None and json_mode_enabled:
+        body["response_format"] = {"type": "json_object"}
+    elif json_mode_env is None and json_mode_enabled:
         body["response_format"] = {"type": "json_object"}
 
     max_tokens = os.getenv("AI_MAX_TOKENS") or os.getenv("OPENAI_COMPATIBLE_MAX_TOKENS")
+    if not max_tokens and local_mode:
+        max_tokens = "600"
     if max_tokens:
         try:
             body["max_tokens"] = int(max_tokens)
@@ -126,23 +185,24 @@ def _openai_compatible_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]
     url = f"{base_url}/chat/completions"
     user_agent = os.getenv(
         "OPENAI_COMPATIBLE_USER_AGENT",
-        "AcademyPrequelV3-Railway/3.5.2 (+https://prequel-v3-production.up.railway.app)",
+        "AcademyPrequelV3/3.5.10 (+local-lm-studio-compatible)",
     )
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+        "Accept": "application/json",
+        "User-Agent": user_agent,
+        "Authorization": f"Bearer {api_key}",
+    }
     request = urllib.request.Request(
         url,
         data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": user_agent,
-            "Authorization": f"Bearer {api_key}",
-        },
+        headers=headers,
         method="POST",
     )
 
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - user-configured endpoint
-            raw_response = response.read().decode("utf-8")
+            raw_response = response.read().decode("utf-8", errors="replace")
     except urllib.error.HTTPError as exc:
         body_text = _http_error_body(exc)
         raise AIProviderError(f"OpenAI-compatible HTTP {exc.code}: {body_text or exc.reason}") from exc
@@ -164,10 +224,10 @@ def _openai_compatible_response(prompt_bundle: dict[str, Any]) -> dict[str, Any]
         raise AIProviderError(f"Invalid OpenAI-compatible response shape: {exc}; payload={str(payload)[:1000]}") from exc
 
     parsed = _parse_model_content(str(content))
-    scene_text = str(parsed.get("scene_text") or "").strip()
+    scene_text = _repair_common_mojibake(str(parsed.get("scene_text") or "")).strip()
 
     return {
-        "provider": "openai_compatible",
+        "provider": "lmstudio" if local_mode else "openai_compatible",
         "model": model,
         "scene_text": scene_text,
         "state_changes": parsed.get("state_changes", {}) if isinstance(parsed.get("state_changes"), dict) else {},
@@ -179,6 +239,6 @@ def generate_ai_response(provider: str | None, prompt_bundle: dict[str, Any]) ->
     selected = (provider or os.getenv("AI_PROVIDER") or "mock").strip().lower()
     if selected in {"mock", "dry", "test"}:
         return _mock_response(prompt_bundle)
-    if selected in {"openai_compatible", "openai-compatible", "lmstudio", "local"}:
-        return _openai_compatible_response(prompt_bundle)
+    if selected in {"openai_compatible", "openai-compatible", "lmstudio", "lm-studio", "local", "local_lm_studio"}:
+        return _openai_compatible_response(prompt_bundle, selected)
     raise AIProviderError(f"Unsupported AI_PROVIDER: {selected}")
